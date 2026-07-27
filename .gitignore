@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+dist/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+
+# Configuração local do Claude Code / MCP — cada contribuidor autentica com
+# suas próprias credenciais (HTTP Basic Auth no modo Docker), então esses
+# arquivos nunca devem ser versionados.
+.mcp.json
+.claude/settings.local.json

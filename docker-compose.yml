@@ -1,0 +1,25 @@
+services:
+  omie-finance-mcp:
+    build: .
+    image: omie-finance-mcp
+    env_file:
+      - .env
+    # One persistent server (`docker compose up -d`), not spawned per client.
+    # Clients connect over HTTP — see README.md "Conectando um cliente MCP".
+    # No network_mode: host needed here (unlike setups that reach a local
+    # service): the OMIE API is a public cloud endpoint, so a normal `ports:`
+    # mapping is enough for both directions.
+    #
+    # OMIE_APP_KEY/OMIE_APP_SECRET are NOT set here on purpose: this is a
+    # multi-tenant deployment — every client authenticates with their own
+    # OMIE credentials via HTTP Basic Auth on the MCP connection itself (see
+    # auth.py), so there is no single shared credential to configure.
+    environment:
+      - MCP_TRANSPORT=${MCP_TRANSPORT:-streamable-http}
+      - MCP_HOST=${MCP_HOST:-0.0.0.0}
+      - MCP_PORT=${MCP_PORT:-8020}
+      - MCP_ALLOWED_HOSTS=${MCP_ALLOWED_HOSTS:-}
+      - MCP_ALLOWED_ORIGINS=${MCP_ALLOWED_ORIGINS:-}
+    ports:
+      - "${MCP_PORT:-8020}:8020"
+    restart: unless-stopped
