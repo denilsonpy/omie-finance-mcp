@@ -11,9 +11,13 @@ services:
     # mapping is enough for both directions.
     #
     # OMIE_APP_KEY/OMIE_APP_SECRET are NOT set here on purpose: this is a
-    # multi-tenant deployment — every client authenticates with their own
-    # OMIE credentials via HTTP Basic Auth on the MCP connection itself (see
-    # auth.py), so there is no single shared credential to configure.
+    # multi-tenant deployment — every client authenticates with their own OMIE
+    # credentials on the MCP request itself, either as
+    # `Authorization: Basic base64(app_key:app_secret)` or as the
+    # X-Omie-App-Key/X-Omie-App-Secret headers (see auth.py), so there is no
+    # single shared credential to configure. Setting them here would only add a
+    # server-wide credential for requests to fall back to — which is exactly
+    # what auth.py refuses to do.
     environment:
       - MCP_TRANSPORT=${MCP_TRANSPORT:-streamable-http}
       - MCP_HOST=${MCP_HOST:-0.0.0.0}

@@ -15,10 +15,23 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.28.1",
-    "mcp[cli]>=1.26.0",
+    # <2: o mcp 2.0 removeu `mcp.server.fastmcp`, que server.py e as tools
+    # importam. Sem o teto, um build limpo (Docker) resolve 2.x e morre no
+    # import. Migrar para o 2.x é tarefa à parte.
+    "mcp[cli]>=1.26.0,<2",
+    # Configuração (config.py). Requer python-dotenv para ler os .env.
+    "pydantic-settings>=2.4",
     "python-dotenv>=1.2.2",
     "starlette>=0.40",
+    # Importado direto pelo server.main(): dirigimos o uvicorn nós mesmos para
+    # poder embrulhar o app ASGI no middleware de autenticação.
     "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
 ]
 
 [project.urls]
@@ -35,3 +48,14 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/omie_finance_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    # Ver o comentário do import em tests/test_http_multitenant.py.
+    "ignore:Use `streamable_http_client` instead.:DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]

@@ -19,8 +19,10 @@ Exemplos do tipo de pedido que o assistente consegue resolver sozinho:
 - `client.py` — cliente HTTP puro para a API do OMIE. Cada operação (`listar_contas_pagar`,
   `gerar_pix`, etc.) é um método nomeado, então dá pra usar essa classe fora do
   contexto do MCP também, se precisar.
-- `auth.py` — só entra em jogo no modo servidor HTTP (ver abaixo): resolve qual
-  credencial OMIE atende cada requisição.
+- `auth.py` — só entra em jogo no modo servidor HTTP (ver abaixo): recusa
+  requisição sem credencial e resolve, a cada chamada, qual credencial OMIE a
+  atende.
+- `config.py` — configuração lida do ambiente e dos `.env`.
 - `server.py` — monta o servidor MCP (via [FastMCP](https://github.com/modelcontextprotocol/python-sdk))
   e registra as ferramentas.
 - `tools/` — um arquivo por área do OMIE (contas a pagar, PIX, cadastros...),
@@ -32,7 +34,7 @@ Duas formas de rodar, dependendo do uso:
 |---|---|---|
 | Para quem | Uso pessoal, uma credencial OMIE | Vários usuários/clientes, cada um com a própria conta OMIE |
 | Como sobe | `uvx`, ou o próprio Claude Desktop spawna o processo | Container Docker de vida longa |
-| Credencial | Fixa, via variável de ambiente | Por requisição, via HTTP Basic Auth |
+| Credencial | Fixa, via variável de ambiente | Por requisição, no header da chamada |
 
 ## Requisitos
 
@@ -134,11 +136,27 @@ sobe **um único servidor HTTP** que várias pessoas/clientes compartilham — e
 um usa a própria conta OMIE.
 
 Isso só funciona porque a autenticação é **por requisição**: o servidor não
-guarda `app_key`/`app_secret` nenhum. Cada chamada MCP chega com HTTP Basic Auth
-(usuário = `app_key`, senha = `app_secret`), e é essa credencial — validada pelo
-próprio OMIE, não por um cadastro paralelo — que decide qual conta aquela
-chamada enxerga. Um cliente não tem como acessar dados de outro porque
-literalmente não tem a chave dele.
+guarda `app_key`/`app_secret` nenhum. Cada chamada MCP chega com a credencial de
+quem a fez, de uma destas duas formas:
+
+```
+Authorization: Basic base64("app_key:app_secret")
+```
+```
+X-Omie-App-Key: <app_key>
+X-Omie-App-Secret: <app_secret>
+```
+
+É essa credencial — validada pelo próprio OMIE, não por um cadastro paralelo —
+que decide qual conta aquela chamada enxerga. Um cliente não tem como acessar
+dados de outro porque literalmente não tem a chave dele. Requisição sem
+credencial recebe `401` com um corpo JSON explicando o que faltou, e não chega
+a entrar no servidor MCP.
+
+A resolução acontece **em cada chamada de ferramenta**, a partir dos headers da
+requisição que a originou — não uma vez por sessão. É o que garante que duas
+chamadas na mesma sessão MCP, com credenciais diferentes, operem cada uma na
+sua conta (ver `tests/test_http_session_hijack.py`).
 
 ```bash
 git clone https://github.com/denilsonpy/omie-finance-mcp
@@ -155,16 +173,20 @@ reboot.
 
 Duas coisas que precisam estar certas:
 
-1. **TLS na frente.** Basic Auth só ofusca em base64 — sem HTTPS, a credencial de
-   qualquer cliente pode ser capturada em trânsito. Coloque um reverse proxy
-   (Caddy, nginx) com certificado válido antes de aceitar tráfego público; dá
-   pra conseguir HTTPS sem nem ter domínio próprio usando
-   [sslip.io](https://sslip.io). Numa rede fechada (VPN, LAN), Basic Auth sozinho
-   já resolve.
-2. **`MCP_ALLOWED_HOSTS`.** O SDK do MCP tem proteção contra DNS rebinding e, por
-   padrão, só aceita requisições cujo `Host` seja `localhost`. Atrás de um
-   domínio/IP público, declare esse hostname na variável (ver `.env.example`) —
-   senão toda chamada externa recebe `421`.
+1. **TLS na frente.** A credencial viaja em claro (o base64 do Basic só ofusca) —
+   sem HTTPS, a chave de qualquer cliente pode ser capturada em trânsito.
+   Coloque um reverse proxy (Caddy, nginx) com certificado válido antes de
+   aceitar tráfego público; dá pra conseguir HTTPS sem nem ter domínio próprio
+   usando [sslip.io](https://sslip.io). Numa rede fechada (VPN, LAN), a
+   credencial sozinha já resolve.
+2. **`MCP_ALLOWED_HOSTS`.** O SDK do MCP tem proteção contra DNS rebinding, que
+   depende de uma allowlist de `Host`. Vazio (o padrão) ela fica **desligada** —
+   é o que um servidor acessado remotamente precisa, porque a allowlist que o
+   SDK liga sozinho aceita só `localhost` e responde `421` a todo cliente
+   externo. Quem controla acesso aqui é a credencial do OMIE, não o header
+   `Host`: uma página maliciosa que "rebindou" DNS não tem a `app_key` de
+   ninguém. Se quiser a checagem ligada de todo modo, declare ali os hostnames
+   pelos quais os clientes chegam (ver `.env.example`).
 
 ### Cada cliente se conecta com a própria credencial
 
@@ -191,6 +213,33 @@ ou equivalente em `.mcp.json` / `claude_desktop_config.json`:
   }
 }
 ```
+
+Se preferir não lidar com base64, os headers próprios são equivalentes:
+
+```json
+{
+  "mcpServers": {
+    "omie-finance-mcp": {
+      "type": "http",
+      "url": "https://seu-servidor/mcp",
+      "headers": {
+        "X-Omie-App-Key": "app_key_do_cliente",
+        "X-Omie-App-Secret": "app_secret_do_cliente"
+      }
+    }
+  }
+}
+```
+
+### Testes
+
+```bash
+uv sync --extra dev
+uv run pytest
+```
+
+Nenhum teste fala com a API do OMIE: o `OmieClient` é substituído por um dublê,
+e os testes de HTTP sobem o servidor de verdade em `127.0.0.1` numa porta livre.
 
 ---
 
@@ -291,6 +340,7 @@ omie-finance-mcp/
 ├── src/omie_finance_mcp/
 │   ├── client.py
 │   ├── auth.py
+│   ├── config.py
 │   ├── server.py
 │   └── tools/
 │       ├── suppliers.py
@@ -303,6 +353,10 @@ omie-finance-mcp/
 │       ├── cash_flow.py
 │       ├── financial_movements.py
 │       └── finance_registries.py
+├── tests/
+│   ├── test_auth.py
+│   ├── test_http_multitenant.py
+│   └── test_http_session_hijack.py
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .env.example
